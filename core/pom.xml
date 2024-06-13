@@ -36,6 +36,16 @@
   
   <dependencies>
     <dependency>
+      <groupId>com.lihaoyi</groupId>
+      <artifactId>requests_${scala.binary.version}</artifactId>
+      <version>${requests.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>com.lihaoyi</groupId>
+      <artifactId>ujson_${scala.binary.version}</artifactId>
+      <version>${ujson.version}</version>
+    </dependency>
+    <dependency>
       <groupId>org.scala-lang.modules</groupId>
       <artifactId>scala-parallel-collections_${scala.binary.version}</artifactId>
     </dependency>

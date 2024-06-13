@@ -121,6 +121,8 @@
     <asm.version>9.7</asm.version>
     <slf4j.version>2.0.13</slf4j.version>
     <log4j.version>2.22.1</log4j.version>
+    <requests.version>0.8.0</requests.version>
+    <ujson.version>3.1.2</ujson.version>
     <!-- make sure to update IsolatedClientLoader whenever this version is changed -->
     <hadoop.version>3.4.0</hadoop.version>
     <!-- SPARK-41247: When updating `protobuf.version`, also need to update `protoVersion` in `SparkBuild.scala` -->

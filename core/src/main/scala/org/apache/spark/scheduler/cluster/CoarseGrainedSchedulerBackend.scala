@@ -17,7 +17,7 @@
 
 package org.apache.spark.scheduler.cluster
 
-import java.util.concurrent.{ScheduledExecutorService, TimeUnit}
+import java.util.concurrent.{Executors, ScheduledExecutorService, TimeUnit}
 import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
 import javax.annotation.concurrent.GuardedBy
 
@@ -73,6 +73,8 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
   // if minRegisteredRatio has not yet been reached
   private val maxRegisteredWaitingTimeNs = TimeUnit.MILLISECONDS.toNanos(
     conf.get(SCHEDULER_MAX_REGISTERED_RESOURCE_WAITING_TIME))
+  // OIDC token refresher
+  private val oidcClient = new OidcClient(conf)
   private val createTimeNs = System.nanoTime()
 
   // Accessing `executorDataMap` in the inherited methods from ThreadSafeRpcEndpoint doesn't need
@@ -139,6 +141,8 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
   private val reviveThread =
     ThreadUtils.newDaemonSingleThreadScheduledExecutor("driver-revive-thread")
 
+  private val tokenRefreshScheduler = Executors.newScheduledThreadPool(1)
+
   private val cleanupService: Option[ScheduledExecutorService] =
     conf.get(EXECUTOR_DECOMMISSION_FORCE_KILL_TIMEOUT).map { _ =>
       ThreadUtils.newDaemonSingleThreadScheduledExecutor("cleanup-decommission-execs")
@@ -194,6 +198,10 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
 
       case ReviveOffers =>
         makeOffers()
+
+      case RequestOidcToken(executorRef) =>
+        logInfo(s"Driver got request to update executor OIDC at: ${executorRef.address}")
+        if (oidcClient.getToken.nonEmpty) updateExecutorOidcToken(executorRef)
 
       case KillTask(taskId, executorId, interruptThread, reason) =>
         executorDataMap.get(executorId) match {
@@ -277,6 +285,13 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
           addressToExecutorId(executorAddress) = executorId
           totalCoreCount.addAndGet(cores)
           totalRegisteredExecutors.addAndGet(1)
+
+          if (oidcClient.oidcEnabled && oidcClient.getToken.nonEmpty) {
+            // Send OIDC token to executor
+            logInfo(s"Sending initial OIDC token to registered executor $executorAddress")
+            updateExecutorOidcToken(executorRef)
+          }
+
           val resourcesInfo = resources.map { case (rName, info) =>
             (info.name, new ExecutorResourceInfo(info.name, info.addresses.toIndexedSeq))
           }
@@ -641,6 +656,21 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
         }
       }
     }
+    if (oidcClient.oidcEnabled) {
+      logInfo("Refreshing OIDC Token")
+      oidcClient.refreshToken()
+      oidcClient.persistToken()
+
+      logInfo("Starting OIDC Token refresh thread")
+      val refreshOidcTokenTask = oidcClient.getOidcRefreshRunnable
+      tokenRefreshScheduler.scheduleAtFixedRate(
+        refreshOidcTokenTask, 5, oidcClient.getTokenRefreshInterval, TimeUnit.SECONDS
+      )
+    }
+  }
+
+  private def updateExecutorOidcToken(executorRef: RpcEndpointRef): Unit = {
+    executorRef.send(UpdateOidcTokenOnExecutors(oidcClient.getToken.get.accessToken))
   }
 
   protected def createDriverEndpoint(): DriverEndpoint = new DriverEndpoint()

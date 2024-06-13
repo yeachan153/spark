@@ -60,6 +60,12 @@ private[spark] object CoarseGrainedClusterMessages {
   case class UpdateDelegationTokens(tokens: Array[Byte])
     extends CoarseGrainedClusterMessage
 
+  case class UpdateOidcTokenOnExecutors(token: String)
+    extends CoarseGrainedClusterMessage
+
+  case class RequestOidcToken(executorEndpoint: RpcEndpointRef)
+    extends CoarseGrainedClusterMessage
+
   // Executors to driver
   case class RegisterExecutor(
       executorId: String,

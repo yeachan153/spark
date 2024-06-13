@@ -21,6 +21,7 @@ import java.io.File
 import java.net.URL
 import java.nio.ByteBuffer
 
+import java.util.concurrent.{Executors, ThreadFactory, TimeUnit}
 import org.apache.spark.{SparkConf, SparkContext, SparkEnv, TaskState}
 import org.apache.spark.TaskState.TaskState
 import org.apache.spark.executor.{Executor, ExecutorBackend}
@@ -99,6 +100,14 @@ private[spark] class LocalEndpoint(
   }
 }
 
+class DaemonThreadFactory extends ThreadFactory {
+  def newThread(r: Runnable): Thread = {
+    val thread = new Thread(r)
+    thread setDaemon true
+    thread
+  }
+}
+
 /**
  * Used when running a local version of Spark where the executor, backend, and master all run in
  * the same JVM. It sits behind a [[TaskSchedulerImpl]] and handles launching tasks on a single
@@ -114,6 +123,8 @@ private[spark] class LocalSchedulerBackend(
   private var localEndpoint: RpcEndpointRef = null
   private val userClassPath = getUserClasspath(conf)
   private val listenerBus = scheduler.sc.listenerBus
+  private val oidcClient = new OidcClient(conf)
+  private val tokenRefreshScheduler = Executors.newScheduledThreadPool(1, new DaemonThreadFactory)
   private val launcherBackend = new LauncherBackend() {
     override def conf: SparkConf = LocalSchedulerBackend.this.conf
     override def onStopRequest(): Unit = stop(SparkAppHandle.State.KILLED)
@@ -132,6 +143,17 @@ private[spark] class LocalSchedulerBackend(
   launcherBackend.connect()
 
   override def start(): Unit = {
+    if (oidcClient.oidcEnabled) {
+      logInfo("Refreshing OIDC Token")
+      oidcClient.refreshToken()
+      oidcClient.persistToken()
+
+      logInfo("Staring OIDC Token refresh thread")
+      val refreshOidcTokenTask = oidcClient.getOidcRefreshRunnable
+      tokenRefreshScheduler.scheduleAtFixedRate(
+        refreshOidcTokenTask, 5, oidcClient.getTokenRefreshInterval, TimeUnit.SECONDS
+      )
+    }
     val rpcEnv = SparkEnv.get.rpcEnv
     val executorEndpoint = new LocalEndpoint(rpcEnv, userClassPath, scheduler, this, totalCores)
     localEndpoint = rpcEnv.setupEndpoint("LocalSchedulerBackendEndpoint", executorEndpoint)

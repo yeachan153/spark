@@ -849,6 +849,71 @@ package object config {
       .toSequence
       .createWithDefault(Nil)
 
+  private[spark] val OIDC_ENABLED =
+    ConfigBuilder("spark.oidc.enabled")
+      .doc("")
+      .version("4.0.0")
+      .booleanConf
+      .createWithDefault(false)
+
+  private[spark] val OIDC_SSO_TIMEOUT =
+    ConfigBuilder("spark.oidc.ssoTimeout")
+      .doc("Client or realm SSO timeout in seconds, used to display how long the user will " +
+        "stay authenticated for based on the auth_time returned by the access token")
+      .version("4.0.0")
+      .intConf
+      .createWithDefault(0)
+
+  private[spark] val OIDC_TOKEN_PATH = ConfigBuilder("spark.oidc.tokenPath")
+    .doc("Path to find/write the OIDC token")
+    .version("4.0.0")
+    .stringConf
+    .createWithDefault("")
+
+  private[spark] val OIDC_CLIENT = ConfigBuilder("spark.oidc.clientId")
+    .doc("An access token will be fetched for this client")
+    .version("4.0.0")
+    .stringConf
+    .createWithDefault("")
+
+  private[spark] val OIDC_CLIENT_SECRET = ConfigBuilder("spark.oidc.clientSecret")
+    .doc("Client secret for non-public clients")
+    .version("4.0.0")
+    .stringConf
+    .createWithDefault(null)
+
+  private[spark] val OIDC_USERNAME = ConfigBuilder("spark.oidc.username")
+    .doc("For non interactive runs, provide the username for the ROPC flow")
+    .version("4.0.0")
+    .stringConf
+    .createOptional
+
+  private[spark] val OIDC_PASSWORD = ConfigBuilder("spark.oidc.password")
+    .doc("For non interactive runs, provide the password for the ROPC flow")
+    .version("4.0.0")
+    .stringConf
+    .createOptional
+
+  private[spark] val OIDC_CONNECT_DISCOVERY_URL = ConfigBuilder("spark.oidc.connectDiscoveryUrl")
+    .doc("Link to OIDC discovery URL")
+    .version("4.0.0")
+    .stringConf
+    .createWithDefault("")
+
+   private[spark] val OIDC_TOKEN_EXECUTOR_UPDATE_INTERVAL =
+     ConfigBuilder("spark.oidc.executor.update.interval")
+     .doc("How frequently executors should request a token update from the driver")
+     .version("4.0.0")
+     .intConf
+     .createWithDefault(60)
+
+   private[spark] val OIDC_TOKEN_REFRESH_INTERVAL =
+   ConfigBuilder("spark.oidc.refresh.interval")
+     .doc("How often the driver should attempt to refresh the access token")
+     .version("4.0.0")
+     .intConf
+     .createWithDefault(60)
+
   private[spark] val EXECUTOR_INSTANCES = ConfigBuilder("spark.executor.instances")
     .version("1.0.0")
     .intConf

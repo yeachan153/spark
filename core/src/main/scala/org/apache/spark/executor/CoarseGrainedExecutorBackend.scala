@@ -17,14 +17,19 @@
 
 package org.apache.spark.executor
 
+import java.io.File
 import java.net.URL
 import java.nio.ByteBuffer
 import java.util.Locale
+import java.util.concurrent.{Executors, TimeUnit}
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicLong}
 
 import scala.util.{Failure, Success}
 import scala.util.control.NonFatal
 
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.module.scala.DefaultScalaModule
+import com.fasterxml.jackson.module.scala.experimental.ScalaObjectMapper
 import io.netty.util.internal.PlatformDependent
 
 import org.apache.spark._
@@ -42,6 +47,7 @@ import org.apache.spark.resource.ResourceProfile._
 import org.apache.spark.resource.ResourceUtils._
 import org.apache.spark.rpc._
 import org.apache.spark.scheduler.{ExecutorLossMessage, ExecutorLossReason, TaskDescription}
+import org.apache.spark.scheduler.OidcToken
 import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages._
 import org.apache.spark.util.{ChildFirstURLClassLoader, MutableURLClassLoader, SignalUtils, ThreadUtils, Utils}
 
@@ -111,6 +117,25 @@ private[spark] class CoarseGrainedExecutorBackend(
       case Failure(e) =>
         exitExecutor(1, s"Cannot register with driver: $driverUrl", e, notifyDriver = false)
     }(ThreadUtils.sameThread)
+
+    if (env.conf.get(OIDC_ENABLED)) {
+      logInfo("Starting thread to request refresh tokens")
+      val scheduler = Executors.newScheduledThreadPool(1)
+      val requestOidcTokenTask = new Runnable() {
+        override def run(): Unit = {
+          requestOidcToken()
+        }
+      }
+      scheduler.scheduleAtFixedRate(
+        requestOidcTokenTask, 5, env.conf.get(OIDC_TOKEN_EXECUTOR_UPDATE_INTERVAL),
+        TimeUnit.SECONDS
+      )
+    }
+  }
+
+  private def requestOidcToken(): Unit = {
+    logInfo("Requesting OIDC token update from driver")
+    driver.get.send(RequestOidcToken(self))
   }
 
   /**
@@ -223,8 +248,24 @@ private[spark] class CoarseGrainedExecutorBackend(
       logInfo(log"Received tokens of ${MDC(LogKeys.NUM_BYTES, tokenBytes.length)} bytes")
       SparkHadoopUtil.get.addDelegationTokens(tokenBytes, env.conf)
 
+    case UpdateOidcTokenOnExecutors(accessToken) =>
+      logInfo("Received token from driver")
+      val oidcTokenPath = env.conf.get(OIDC_TOKEN_PATH)
+      setOidcToken(accessToken, oidcTokenPath)
+
     case DecommissionExecutor =>
       decommissionSelf()
+  }
+
+  private def setOidcToken(accessToken: String, tokenPath: String): Unit = {
+    var token = OidcToken(accessToken, null, null)
+    writeJsonFile(token, tokenPath)
+  }
+
+  private def writeJsonFile(token: OidcToken, filePath: String): Unit = {
+    val objectMapper = new ObjectMapper() with ScalaObjectMapper
+    objectMapper.registerModule(DefaultScalaModule)
+    objectMapper.writeValue(new File(filePath), token)
   }
 
   override def receiveAndReply(context: RpcCallContext): PartialFunction[Any, Unit] = {
